@@ -1,0 +1,191 @@
+===============================================================
+ARCHITECTURE NOTES — Content Broadcasting System
+===============================================================
+
+1. AUTHENTICATION & RBAC FLOW
+───────────────────────────────
+- JWT (JSON Web Tokens) are used for stateless authentication.
+- On login (POST /auth/login), credentials are verified against bcrypt-hashed
+  passwords in the DB. A signed JWT is returned with { id, email, role, name }.
+- All protected routes use the `authenticate` middleware which extracts and
+  verifies the Bearer token from the Authorization header.
+- Role-Based Access Control (RBAC) is enforced via the `authorize(...roles)`
+  middleware which checks req.user.role against allowed roles.
+- Roles: 'principal' and 'teacher'. Permissions are strictly separated:
+    * Principal: view all content, approve/reject, view pending
+    * Teacher: upload content, view own content
+- Public routes (broadcast API) require NO authentication.
+
+2. SUBJECT-BASED SYSTEM DESIGN
+───────────────────────────────
+- Content is tagged with a subject (maths, science, english, etc.).
+- A `content_slots` table stores subject+teacher pairs as unique slot groups.
+- Each slot is the scheduling container for all content of that subject by that teacher.
+- This allows independent rotation per subject per teacher.
+- When a teacher uploads content with time windows, a slot is auto-created.
+
+3. UPLOAD HANDLING APPROACH
+────────────────────────────
+- Multer handles multipart/form-data file uploads.
+- Files are stored locally in src/uploads/ directory.
+- Only JPG, PNG, GIF are allowed (validated by MIME type + extension check).
+- Max file size: 10MB (configurable via .env MAX_FILE_SIZE).
+- Files are named with timestamp + random suffix to avoid collisions.
+- File URL is stored in DB as /uploads/filename for static serving.
+- For S3 (bonus): replace diskStorage with multer-s3 and store the S3 URL.
+- On upload validation failure, the file is deleted from disk (cleanup).
+
+4. APPROVAL WORKFLOW DESIGN
+────────────────────────────
+Content lifecycle: uploaded → pending → approved / rejected
+
+Flow:
+  1. Teacher uploads → content created with status='pending'
+  2. Principal logs in → views pending content via GET /approval/pending
+  3. Principal calls PATCH /approval/:content_id with { action: 'approve'/'reject' }
+  4. On reject: rejection_reason is stored and visible to teacher
+  5. On approve: approved_by and approved_at are stamped; status='approved'
+  6. Only approved content is eligible for broadcasting
+
+Business rules enforced:
+  - Only principal can approve/reject (RBAC)
+  - Only 'pending' content can be actioned (prevents double-approval)
+  - Rejection requires a reason (validation enforced)
+
+5. SCHEDULING / ROTATION LOGIC (MOST IMPORTANT)
+──────────────────────────────────────────────────
+This is the core algorithmic piece of the system.
+
+Data Model:
+  - content_slots: groups content by (subject, teacher)
+  - content_schedule: stores (content_id, slot_id, rotation_order, duration)
+
+Eligibility for rotation (ALL must be true):
+  ✓ content.status = 'approved'
+  ✓ content.start_time IS NOT NULL
+  ✓ content.end_time IS NOT NULL
+  ✓ NOW() BETWEEN content.start_time AND content.end_time
+
+Algorithm (_getActiveContentFromSchedule):
+  Step 1: Calculate total cycle duration = sum of all items' duration_in_ms
+  Step 2: positionInCycle = epoch_ms % total_cycle_ms
+           (epoch = Unix timestamp, globally consistent reference point)
+  Step 3: Walk through sorted items, accumulating durations
+  Step 4: First item where accumulated > positionInCycle → ACTIVE CONTENT
+  Step 5: Repeat independently per subject per teacher
+
+Example (Maths subject, 3 items):
+  Item A: 5 min, Item B: 5 min, Item C: 5 min → Total: 15 min cycle
+  At t=0min → A active
+  At t=6min → B active
+  At t=11min → C active
+  At t=16min → A active again (loops)
+
+This is deterministic, requires no cron jobs, and works across restarts.
+
+6. DATABASE DESIGN DECISIONS
+──────────────────────────────
+Tables:
+  users           → stores principals and teachers (role field differentiates)
+  content         → main content records with full lifecycle tracking
+  content_slots   → maps (subject, teacher) to a slot group
+  content_schedule → rotation order and duration per content per slot
+
+Design choices:
+  - UUIDs as primary keys (prevents enumeration attacks)
+  - CHECK constraints on status and role (DB-level integrity)
+  - UNIQUE constraint on (subject, teacher_id) in content_slots
+  - UNIQUE constraint on (content_id, slot_id) in content_schedule
+  - Indexes on content(status), content(uploaded_by), content(subject),
+    content_schedule(slot_id) for query performance
+  - Soft state: rejection_reason stored rather than deleted
+  - Timestamps: created_at, updated_at, approved_at for full audit trail
+
+7. FOLDER STRUCTURE
+────────────────────
+src/
+  app.js                    → Express app entry point
+  config/
+    database.js             → pg Pool connection config
+  controllers/
+    auth.controller.js      → Login, profile
+    content.controller.js   → Upload, list content
+    approval.controller.js  → Approve/reject
+    broadcast.controller.js → Public live content API
+  routes/
+    auth.routes.js
+    content.routes.js
+    approval.routes.js
+    broadcast.routes.js
+  services/
+    auth.service.js         → Login business logic
+    content.service.js      → Upload, fetch logic
+    approval.service.js     → Approve/reject logic
+    scheduling.service.js   → ROTATION ALGORITHM (core)
+  models/
+    user.model.js           → User DB queries
+    content.model.js        → Content DB queries
+    schedule.model.js       → Slot + schedule queries
+  middlewares/
+    auth.middleware.js      → JWT verify + RBAC
+    upload.middleware.js    → Multer config + error handler
+    validation.middleware.js → Request validation
+    rateLimiter.middleware.js → Express-rate-limit configs
+  utils/
+    jwt.js                  → Token generation/verification
+    response.js             → Standardized response helpers
+    migrate.js              → DB schema creation script
+    seed.js                 → Initial user seed data
+  uploads/                  → Local file storage directory
+
+8. MIDDLEWARE USAGE
+────────────────────
+Request flow for protected routes:
+  Request → generalLimiter → authenticate → authorize(role) → validate → controller
+
+  1. generalLimiter    → prevents abuse (100 req/15min)
+  2. authLimiter       → stricter for /auth/login (10 req/15min)
+  3. broadcastLimiter  → public API protection (60 req/min)
+  4. authenticate      → verifies JWT, attaches req.user
+  5. authorize(role)   → checks req.user.role
+  6. handleUploadError → multer wraps file upload
+  7. validateXxx       → checks req.body fields
+  8. controller        → calls service → model → response
+
+9. SCALABILITY APPROACH
+────────────────────────
+Current (MVP):
+  - Stateless JWT: horizontally scalable (no session state)
+  - pg Pool: connection pooling (max 20 connections)
+  - Rate limiting: prevents API abuse
+  - Indexes: fast queries at scale
+
+Bonus / Future improvements:
+  a) Redis Caching
+     - Cache GET /content/live/:teacher_id with TTL = min rotation duration
+     - Invalidate on approval or content update
+     - Library: ioredis + custom cache middleware
+
+  b) S3 File Storage
+     - Replace multer diskStorage with multer-s3
+     - Store CloudFront CDN URL in DB
+     - Remove local disk dependency (stateless file storage)
+
+  c) Queue-Based Processing
+     - Bull/BullMQ for async content processing
+     - Principal approval notifications via email queue
+     - Keeps upload response fast (return immediately, process async)
+
+  d) Analytics
+     - Track broadcast_hits per content
+     - Aggregate by subject for "most active subject" insights
+     - Add content_analytics table: (content_id, hit_count, last_accessed)
+
+  e) Database Scaling
+     - Read replicas for GET-heavy broadcast API
+     - Partitioning content table by created_at for large datasets
+     - Connection pooling via PgBouncer in production
+
+===============================================================
+END OF ARCHITECTURE NOTES
+===============================================================
