@@ -90,7 +90,7 @@ Edit `.env`:
 PORT=3000
 NODE_ENV=development
 
-DB_HOST=localhost
+DATABASE_URL=your_neon_connection_string
 DB_PORT=5432
 DB_NAME=content_broadcasting
 DB_USER=postgres
@@ -103,11 +103,13 @@ MAX_FILE_SIZE=10485760
 UPLOAD_PATH=./src/uploads
 ```
 
-### 3. Create Database
+### 3. Database Setup
 
-```bash
-psql -U postgres -c "CREATE DATABASE content_broadcasting;"
-```
+No manual database creation is required.
+
+This project uses :contentReference[oaicite:0]{index=0} (serverless PostgreSQL), so the database is already provisioned.
+
+Just add your DATABASE_URL in the `.env` file.
 
 ### 4. Run Migrations
 
