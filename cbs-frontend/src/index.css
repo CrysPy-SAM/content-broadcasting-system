@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-parchment-100 text-ink-900 font-sans;
+    font-feature-settings: 'ss01', 'ss02', 'cv11';
+  }
+
+  /* Custom selection color — sienna ink */
+  ::selection {
+    background-color: #C2410C;
+    color: #FAF7F0;
+  }
+
+  /* Subtle grain texture overlay on body for paper feel */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Make every interactive element above grain */
+  #root {
+    position: relative;
+    z-index: 2;
+  }
+}
+
+@layer components {
+  /* Hairline divider — used throughout */
+  .rule {
+    @apply border-t border-ink-900/15;
+  }
+
+  /* Editorial section label — uppercase, small, tracked */
+  .eyebrow {
+    @apply text-[11px] uppercase tracking-[0.18em] font-medium text-ink-500 font-sans;
+  }
+
+  /* Primary button — sienna fill, hard edges */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-3 bg-ink-900 text-parchment-50
+           font-medium text-sm tracking-wide hover:bg-sienna-600 transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-3 border border-ink-900
+           text-ink-900 font-medium text-sm tracking-wide hover:bg-ink-900 hover:text-parchment-50
+           transition-colors disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 text-ink-700
+           font-medium text-sm hover:text-sienna-600 transition-colors;
+  }
+
+  /* Input — barely-there underline, no rounded corners */
+  .input-field {
+    @apply w-full px-0 py-3 bg-transparent border-0 border-b border-ink-900/30
+           text-ink-900 placeholder:text-ink-400
+           focus:outline-none focus:border-sienna-600 transition-colors;
+  }
+
+  .input-block {
+    @apply w-full px-4 py-3 bg-parchment-50 border border-ink-900/20
+           text-ink-900 placeholder:text-ink-400
+           focus:outline-none focus:border-ink-900 transition-colors;
+  }
+
+  /* Card — flat with hairline border, no rounded */
+  .paper {
+    @apply bg-parchment-50 border border-ink-900/15;
+  }
+
+  /* Smooth fade-in for animated entries */
+  .fade-up {
+    animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Marquee for live broadcast page */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.marquee {
+  animation: marquee 40s linear infinite;
+}
+
+/* Pulsing live dot */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(194, 65, 12, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(194, 65, 12, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(194, 65, 12, 0); }
+}
+
+.live-dot {
+  animation: pulse-ring 2s infinite;
+}

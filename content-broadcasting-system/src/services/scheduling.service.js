@@ -58,7 +58,6 @@ const SchedulingService = {
 
     if (totalCycleMs === 0) return null;
 
-    // Use epoch (Jan 1 1970 00:00:00 UTC) as reference point
     // This makes rotation deterministic and globally consistent
     const epochMs = now.getTime();
     const positionInCycleMs = epochMs % totalCycleMs;
